@@ -1,3 +1,5 @@
+require 'faraday'
+require 'json'
 require 'openssl'
 
 require_relative '../helper'
@@ -7,26 +9,25 @@ module FastlaneCore
     def post_events(events)
       unless Helper.test?
         Thread.new do
-          send_request(json: { analytics: events }.to_json)
+          send_request(events)
         end
       end
       return true
     end
 
-    def send_request(json: nil, retries: 2)
-      post_request(body: json)
+    def send_request(events, retries: 2)
+      post_request(events)
     rescue
       retries -= 1
       retry if retries >= 0
     end
 
-    def post_request(body: nil)
+    def post_request(events)
       if ENV['METRICS_DEBUG']
-        write_json(body)
+        write_json(events.to_json)
       end
-      url = ENV["FASTLANE_METRICS_URL"] || "https://fastlane-metrics.fabric.io"
+      url = "http://www.google-analytics.com"
 
-      require 'faraday'
       connection = Faraday.new(url) do |conn|
         conn.adapter(Faraday.default_adapter)
         if ENV['METRICS_DEBUG']
@@ -34,10 +35,21 @@ module FastlaneCore
           conn.ssl[:verify_mode] = OpenSSL::SSL::VERIFY_NONE
         end
       end
-      connection.post do |req|
-        req.url('/public')
-        req.headers['Content-Type'] = 'application/json'
-        req.body = body
+      events.each do |event|
+        connection.post do |req|
+          req.url('/collect')
+          req.headers['Content-Type'] = 'application/json'
+          req.body = {
+            v: "1",                 # API Version
+            tid: "UA-120900387-1",  # Tracking ID / Property ID
+            cid: event.client_id,   # Client ID
+            t: "event",             # Event hit type
+            ec: event.category,     # Event category
+            ea: event.action,       # Event action
+            el: event.label,        # Event label
+            ev: event.value         # Event value
+          }
+        end
       end
     end
 
